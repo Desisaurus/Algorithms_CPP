@@ -1,0 +1,346 @@
+#include <stdlib.h>
+#include <string>
+#include <fstream>
+#include <iostream>
+using namespace std;
+
+class listNode {
+private:
+ string data;
+ listNode* next;
+
+ listNode(string s) {
+   data = s;
+   next = NULL;
+ }
+
+ friend class LLStack;
+ friend class LLQ;
+ friend class RadixSort;
+}; // listNode class
+
+
+/******************************************************************************/
+
+// Linked list implementation of stack
+class LLStack {
+private:
+ listNode* top;
+
+ // Inserts new node at top of stack (i.e. front of linked list)
+ void push(listNode* newNode) {
+   newNode->next = top;
+   top = newNode;
+ }
+
+ // Deletes and returns node at top of stack (i.e. front of linked list)
+ listNode* pop(ofstream& outFile) {
+   if (isEmpty()) {
+     outFile << "Stack is empty!";
+     exit(1);
+   } else {
+     listNode* removed = top;
+     top = top->next;
+     removed->next = NULL;
+     return removed;
+   }
+ }
+
+ // Returns 1 (true) if the stack is empty, 0 (false) otherwise
+ bool isEmpty() {
+   return top == NULL;
+ }
+
+public:
+ // Constructor
+ LLStack() {
+   top = NULL;
+ }
+
+ // Prints stack from top to bottom, i.e. front to back of linked list
+ void printStack(ofstream& outFile) {
+   listNode* current = top;
+   const char* a = "\u2192";  // UTF-8
+   outFile << "     *** Below is the output of the Stack *** \n";
+   outFile << "\nTop " << a;
+   while (current != NULL) {
+     outFile << " (" << current->data << ", ";
+     current = current->next;
+     if (current == NULL) {
+       outFile << "NULL) ";
+     } else {
+       outFile << current->data << ") " << a;
+     }
+   }
+   outFile << a << " NULL\n\n";
+ }
+
+ friend class RadixSort;
+}; //LLStack class
+
+
+/******************************************************************************/
+
+// Linked list implementation of queue
+class LLQ {
+private:
+ listNode* head;
+ listNode* tail;
+
+ // Constructor
+ LLQ() {
+   listNode* dummy = new listNode("9999");
+   head = tail = dummy;
+ }
+
+ // Inserts new node at end of queue (i.e. linked list)
+ void addTail(listNode* node) {
+   tail->next = node;
+   tail = node;
+ }
+
+ // Deletes and returns front node of queue (node after dummy node)
+ listNode* deleteHead(ofstream& outFile) {
+   if (isEmpty()) {
+     outFile << "Queue is empty!";
+     exit(1);
+   } else {
+     // Front node of queue is the dummy (i.e. head) node's next
+     listNode* removed = head->next;
+     head->next = head->next->next;
+     removed->next = NULL;
+     if (removed == tail) {
+       tail = head;
+     }
+     return removed;
+   }
+ }
+
+ // Returns 1 (true) if the queue is empty, 0 (false) otherwise
+ bool isEmpty() {
+   return head->next == NULL;
+ }
+
+ // Prints queue from front to back
+ void printQueue(int tableNum, int index, ofstream& outFile) {
+   listNode* current = head;
+   const char* a = "\u2192";  // UTF-8
+
+   outFile << "Table [" << tableNum << "][" << index << "]: ";
+   while (current != NULL) {
+     outFile << " (" << current->data << ", ";
+     current = current->next;
+     if (current == NULL) {
+       outFile << "NULL) ";
+     } else {
+       outFile << current->data << ") " << a;
+     }
+   }
+   outFile << a << " NULL\n";
+ }
+  friend class RadixSort;
+}; //LLQ class
+
+
+/******************************************************************************/
+
+// Sorts input strings alphabetically and writes sorted list to output file
+class RadixSort {
+private:
+ string data;
+ int longestStringLength;  // length of the longest string in the data file
+ int tableSize, tableIndex, currentPosition, currentTable, previousTable;
+
+ LLQ** hashTable;
+
+ // Moves each listNode from stack to the first hash table (hashTable[0])
+ void dumpStack(LLStack s, ofstream& outFile) {
+   listNode* node;
+   // Moves each listNode in the stack to hash bucket corresponding to the
+   // character in currentPosition (currently rightmost)
+   while (!s.isEmpty()) {
+     node = s.pop(outFile);
+     // Gets the current char from the node's data, then its hash index
+     tableIndex = hashIndex(getChar(node));
+     // Adds node at tail of the queue at hashTable[currentTable][tableIndex]
+     hashTable[currentTable][tableIndex].addTail(node);     
+   } // Loops until stack is empty
+   outFile << "\nSort, pass #" << currentPosition + 1 << ":" << endl << endl;
+   printTable(currentTable, outFile);
+   outFile << endl << endl;
+ }
+
+ // Returns the current character of the data in the node
+ char getChar(listNode* node) {
+   data = node->data;
+   char currentChar = data[longestStringLength - currentPosition - 1];
+   return currentChar;
+ }
+
+ // Hash function - converts given character to its ASCII integer value
+ int hashIndex(char c) {
+   int charValue = (int) c;
+   return charValue;
+ }
+
+ // Adds padding to the right of each string to make all words the same length
+ string padString(string input) {
+   // For every character the input is shorter than the longestStringLength,
+   // append a space to it
+   for (int i = input.length(); i < longestStringLength; i++) {
+     input += " ";
+   }
+   return input;
+ }
+
+ // Writes non-empty queues in the table to outFile
+ void printTable(int tableNum, ofstream& outFile) {
+   LLQ currentList;
+   LLQ* table = hashTable[tableNum];
+   // Accesses each bucket; if not empty, prints queue
+   for (int index = 0; index < tableSize; index++) {
+     currentList = table[index];
+     if (!currentList.isEmpty()) {
+       currentList.printQueue(tableNum, index, outFile);
+     }
+   }
+ }
+  void swap(int& x, int& y) {
+   int temp = x;
+   x = y;
+   y = temp;
+ }
+ public:
+ RadixSort() {
+   tableSize = 256;
+   // Creates array of linked list queues in two tables - hashTable[0] and [1]
+   hashTable = new LLQ*[2];
+   hashTable[0] = new LLQ[tableSize];
+   hashTable[1] = new LLQ[tableSize];
+ }
+
+ // Reads input file to determine the longest string and returns that length
+ void firstReading(ifstream& inFile) {
+   longestStringLength = 0;
+   // While there are words in the stream, reads them from inFile
+   while (inFile >> data) {
+     // Finds the longest string and updates longestStringLength
+     if (data.length() > longestStringLength) {
+       longestStringLength = data.length();
+     }
+   } // Loops until inFile is empty (i.e. contains no more integers)
+ }
+
+ // Reads inputFile, adding each string to the passed in stack
+ void loadStack(ifstream& inFile, LLStack& s) {
+   // While there are words in the stream, reads them from inFile
+   while (inFile >> data) {
+     string paddedData = padString(data);
+     listNode* node = new listNode(paddedData);
+     s.push(node);
+   }
+ }
+  // Performs the radix sort and outputs sorted strings to outFile
+ void sort(LLStack& s, ofstream& outFile1, ofstream& outFile2) {
+   // Sets currentPosition to rightmost charater (ignoring padding) in string
+   currentPosition = 0;
+   currentTable = 0;
+   // Moves contents of the stack to hashTable[0] (first pass of Radix Sort)
+   dumpStack(s, outFile2);
+   // Sets up variables for the sort's second pass
+   currentPosition++;
+   currentTable = 1;
+   previousTable = 0;
+   listNode* node;
+   while (currentPosition <= longestStringLength) {
+     // Sequentially moves all queues from previousTable to currentTable
+     for (int currentQueue = 0 ; currentQueue < tableSize; currentQueue++) {
+       // Moves all nodes from the current queue (loops until empty)
+       while (!hashTable[previousTable][currentQueue].isEmpty()) {
+         // Deletes head->next from the queue and assign its data to node
+         node = hashTable[previousTable][currentQueue].deleteHead(outFile2);
+         // Gets the current char from the node's data, then its hash index
+         tableIndex = hashIndex(getChar(node));
+         // Adds node at tail of queue at hashTable[currentTable][tableIndex]
+         hashTable[currentTable][tableIndex].addTail(node);
+       }
+     }
+   outFile2 << "Sort, pass #" << currentPosition + 1 << ":" << endl << endl;
+   printTable(currentTable, outFile2);
+   outFile2 << endl << endl;
+   // Makes currentTable the previous, and vice versa (swap their values)
+   swap(currentTable, previousTable);
+   currentPosition++;
+   } // Repeats loop until all iterations of radix sort are completed
+
+   // Prints the final pass of the radix sort (i.e. the organized data)
+   outFile1 << "                    *** Radix Sort: Final Sorted List ***\n\n";
+   LLQ currentList;
+   LLQ* table = hashTable[previousTable];
+   // Accesses each bucket; if not empty, writes queue to file
+   for (int i = 0; i < tableSize; i++) {
+     currentList = table[i];
+     node = currentList.head->next;
+     while (node != NULL) {
+       data = node->data;
+       outFile1 << data << endl;
+       node = node->next;
+     } // Loops through entire queue at currentList
+   }
+ }
+}; // RadixSort class
+
+
+/******************************************************************************/
+
+int main(int argc, char* argv[]) {
+ LLStack inputStack;
+ RadixSort radixSort;
+  // Program name is argv[0], so argc = number of arguments passed in + 1
+ if (argc != 4) {
+   cout << "Incorrect number of arguments in command line. ";
+   cout << "Run with an inFile, outFile1 and outFile2." << endl;
+   exit(1);
+ }
+  // Declares and opens input and output files
+ ifstream inFile;
+ // TODO !!!CURRENTLY SETUP FOR TEST (Fix for SSH))!!!
+ inFile.open("dataIn.txt");
+ // inFile.open(argv[1]);
+ ofstream outFile1, outFile2;
+ outFile1.open(argv[2]);  // used for output of the sorted data
+ outFile2.open(argv[3]);  // used for debugging
+
+ // Performs initial reading to determine maxDigits and offSet
+ if (inFile.is_open()) {
+   radixSort.firstReading(inFile);
+ } else {
+   cout << "/nUnable to open input file/n";
+   return 1;
+ }
+
+ // Closes and reopens input file to do the second reading/first pass of sort
+ inFile.close();
+ inFile.open(argv[1]);
+ if (inFile.is_open()) {
+   radixSort.loadStack(inFile, inputStack);
+   inputStack.printStack(outFile2);
+ } else {
+   cout << "/nUnable to open input file, second reading/n";
+   return 1;
+ }
+
+ // Performs the Radix Sort
+ if (outFile1.is_open() && outFile2.is_open()) {
+   radixSort.sort(inputStack, outFile1, outFile2);
+ } else {
+   cout << "/nUnable to open output file/n";
+   return 1;
+ }
+  // Closes all files
+ inFile.close();
+ outFile1.close();
+ outFile2.close();
+
+ return 0;
+}
