@@ -1,0 +1,299 @@
+#include <stdlib.h>
+#include <fstream>
+#include <iostream>
+using namespace std;
+
+class DijkstraSSS {
+private:
+  int numNodes;  // number of nodes (also called N) in graph (G)
+  int sourceNode;
+  int currentNode;
+	int minNode;
+	int newCost;
+
+  static const int infinity = 99999;
+  const char* arrow = "\u2190";  // UTF-8
+  
+  // Node IDs are numbered 1-N (zero is not used)
+  int** costMatrix;  // a 2-D cost matrix, sized N+1 x N+1
+  int* fatherAry;    // a tracking array for current parent nodes, size of N+1
+  int* markedAry;    // a tracking array, size of N+1; zero indicates not marked
+  int* bestCostAry;  // a tracking array for best cost, size of N+1
+
+  // Copies the source node's row from costMatrix for initial best cost setting
+  void setBestCostAry() {
+    for (int j = 1; j < numNodes + 1; j++) {
+      bestCostAry[j] = costMatrix[sourceNode][j];
+    }
+  }
+
+  // Sets each node's father to the current sourceNode
+  void setFatherAry() {
+    for (int i = 1; i < numNodes + 1; i++) {
+      fatherAry[i] = sourceNode;
+    }
+  }
+  
+  // Sets sourceNode to 1 (marked) and all others to 0 (unmarked)
+  void setMarkedAry() {
+    for (int i = 1; i < numNodes + 1; i++) {
+      if (i == sourceNode) {
+        markedAry[i] = i;
+      } else {
+        markedAry[i] = 0;
+      }
+    }
+  }
+
+  // Goes through unmarked nodes and notes the one with lowest cost
+  void findMinNode() {
+    int minCost = infinity;
+    minNode = 0;
+
+    int index = 1;
+    while (index <= numNodes) {
+      // If a node is unmarked, checks its cost against the minimum
+      if (markedAry[index] == 0) {
+        if (bestCostAry[index] < minCost) {
+          minCost = bestCostAry[index];
+          minNode = index;
+        }
+      }
+      index++;
+    }
+  }
+
+  // Prints sourceNode, fatherAry, bestCostAry, and markedAry to outFile
+  void	debugPrint(ofstream& outFile) {
+    outFile << "The sourceNode is: " << sourceNode;
+    outFile << "\nThe fatherAry is: ";
+    for (int i = 1; i < numNodes + 1; i++) {
+      outFile << fatherAry[i] << " ";
+    }
+    outFile << "\nThe bestCostAry is: ";
+    for (int i = 1; i < numNodes + 1; i++) {
+      outFile << bestCostAry[i] << " ";
+    }
+    outFile << "\nThe markedAry is: ";
+    for (int i = 1; i < numNodes + 1; i++) {
+      outFile << markedAry[i] << " ";
+    }
+    outFile << endl << endl;
+  }
+
+  // Computes the best cost for currentNode
+  // This is best cost to the minNode plus edge cost from there to currentNode
+  void computeCost () {
+    newCost = bestCostAry[minNode] + costMatrix[minNode][currentNode];
+  }
+
+  // Prints shortest path (w/ cost) from sourceNode to currentNode to outFile
+  void printShortestPath(ofstream& outFile) {
+    outFile << "The path from " << sourceNode << " to " << currentNode << " : "
+            << currentNode << " " << arrow << " ";
+    // Recursively traces from currentNode back to sourceNode via fatherAry
+    bestCostPath(currentNode, outFile);
+    outFile << " : cost = " << bestCostAry[currentNode] << endl;
+  }
+
+  // Recursively outputs input node's best cost path to outFile
+  void bestCostPath(int node, ofstream& outFile) {
+    if (node == sourceNode || fatherAry[node] == sourceNode) {
+      outFile << sourceNode;
+      return;
+    }
+    outFile << fatherAry[node] << " " << arrow << " ";
+    bestCostPath(fatherAry[node], outFile);
+  }
+
+public:
+  // Constructor (allocates and initializes all class arrays)
+  DijkstraSSS(int N) {
+    numNodes = N;
+    // Dynamically allocates a 2D array, N+1 by N+1
+    costMatrix = new int*[N + 1];
+    for (int i = 0; i < N + 1; i++) {
+      costMatrix[i] = new int[N + 1];
+      // Initially sets costMatrix[i][i] to zero, and all others to infinity
+      for (int j = 0; j < N + 1; j++) {
+        // Borders (i.e. row and column 0) set to represent node headings
+        if (i == 0) {
+          costMatrix[i][j] = j;
+        } else if (j == 0) {
+          costMatrix[i][j] = i;
+        // Rest of matrix is initialized to zero (own node) or infinity
+        } else if (i == j) {
+          costMatrix[i][j] = 0;
+        } else {
+          costMatrix[i][j] = 99999;
+        }
+      }
+    }
+
+    // Dynamically allocates an array to track parent nodes
+    fatherAry = new int[N + 1];
+    for (int i = 1; i < N + 1; i++) {
+      // Initially sets each node's father as itself
+      fatherAry[i] = i;
+    }
+    // Sets first array element (unused) to -1
+    fatherAry[0] = -1;
+
+    // Dynamically allocates an array to track parent nodes
+    markedAry = new int[N + 1];
+    for (int i = 1; i < N + 1; i++) {
+      // Initially sets each node to 0 (not marked)
+      markedAry[i] = 0;
+    }
+    // Sets first array element (unused) to -1
+    markedAry[0] = -1;
+    
+    // Dynamically allocates an array to track best cost
+    bestCostAry = new int[N + 1];
+    for (int i = 1; i < N + 1; i++) {
+      // Initially sets each node to infinity
+      bestCostAry[i] = infinity;
+    }
+    // Sets first array element (unused) to -1
+    bestCostAry[0] = -1;
+  }
+  
+  // Reads from input file and fills the costMatrix
+  void loadCostMatrix(ifstream& inFile) {
+    sourceNode = 1;
+    int from, to, cost;
+    // Reads in each graph triplet
+    while (inFile >> from >> to >> cost) {
+      costMatrix[from][to] = cost;
+    }
+    // Checks to ensure end of file has been reached
+    if (!inFile.eof()) {
+      cout << "File read error; input file must be in the following form:\n"
+           << "First text line represents the number of nodes in the graph.\n"
+           << "Subsequent lines contain integer triplets representing the "
+           << "origin node, destination node, and cost (<ni, nj, cost>).";
+      exit(1);
+    }
+  }
+
+  // Finds and prints best cost paths to each node, from each node 
+  void findShortestPaths(ofstream& outFile1, ofstream& outFile2) {
+    // Prints heading to outFile1 (stores results of findShortestPaths)
+    outFile1 << "=============================================================="
+             << "==================\nThere are " << numNodes << " nodes in the "
+             << "input graph. Below are the all pairs of shortest paths:\n====="
+             << "=============================================================="
+             << "=============\n";
+    // Prints heading to outFile2 (used for debugging output)
+    outFile2 << "=============================================================="
+             << "==================\n                              Debugging "
+             << "Output\n";
+    // Loops until each node has been designated as the source
+    while (sourceNode <= numNodes) {
+      outFile2 << "=========================================================="
+               << "======================\nSource node = " << sourceNode
+               << endl << endl;
+      // Resets all tracking arrays
+      setBestCostAry();
+      setFatherAry();
+      setMarkedAry();
+      bool allNodesMarked = false;
+      // Loops until all nodes are marked
+      while (!allNodesMarked) {
+        findMinNode();
+        markedAry[minNode] = 1;
+        debugPrint(outFile2);
+        outFile2 << "========================================\n\n";
+        currentNode = 1;
+        // Expands the minNode
+        // Goes through all nodes, computes new costs, and fills in arrays
+        while (currentNode <= numNodes) {
+          // If node is unmarked, computes its new cost
+          if (markedAry[currentNode] == 0) {
+            computeCost();
+            if (newCost < bestCostAry[currentNode]) {
+              bestCostAry[currentNode] = newCost;
+              fatherAry[currentNode] = minNode;
+              debugPrint(outFile2);
+            }
+          }
+        currentNode++;
+        }
+        // Checks to see if all nodes are marked
+        allNodesMarked = true;
+        for (int i = 1; i < numNodes + 1; i++) {
+          if (markedAry[i] == 0) {
+            allNodesMarked = false;
+          }
+        }
+      }
+      // Prints the paths
+      currentNode = 1;
+      outFile1 << "Source node = " << sourceNode << endl << endl;
+      while (currentNode <= numNodes) {
+        printShortestPath(outFile1);
+        currentNode++;
+      }
+      outFile1 << "\n==================================================\n";
+      // Once best paths have been printed for sourceNode, looks at the next
+      sourceNode++;
+    }
+  }
+}; // DijkstraSSS class
+
+
+/******************************************************************************/
+
+int main(int argc, char* argv[]) {
+  int numNodesGiven;  // stores numNodes (N) read in from inFile
+
+  // Program name is argv[0], so argc = number of arguments passed in + 1
+  if (argc != 4) {
+    cout << "Incorrect number of arguments in command line. "
+         << "Program must be run with an input file and two output files "
+         << "- 3 total command line arguments.\n";
+    return 1;
+  }
+  
+  // Input file is a text file containing a directed graph, with nodes 1 - N
+  // This is represented by a list of directed edge pairs with costs <ni, nj, c>
+  ifstream inFile;
+  inFile.open(argv[1]);
+
+  // Output file 1 stores the results of finding all shortest path pairs
+  ofstream outFile1;
+  outFile1.open(argv[2]);
+
+  // Output file 2 is for debugging outputs
+  ofstream outFile2;
+  outFile2.open(argv[3]);
+
+  // Checks that inFile opened correctly, and reads in first integer numNodes
+  if (inFile.is_open()) {
+    inFile >> numNodesGiven;
+  } else {
+    cout << "\nUnable to open input file.";
+    return 1;
+  }
+
+  // Checks that both outFiles opened correctly
+  if (!outFile1.is_open()) {
+    cout << "\nUnable to open first output file.";
+    return 1;
+  } else if (!outFile2.is_open()) {
+    cout << "\nUnable to open second output file.";
+    return 1;
+  }
+
+  // Initializes sssPaths and fills in its costMatrix
+  DijkstraSSS sssPaths(numNodesGiven);
+  sssPaths.loadCostMatrix(inFile);
+
+  sssPaths.findShortestPaths(outFile1, outFile2);
+  
+  inFile.close();
+  outFile1.close();
+  outFile2.close();
+
+  return 0;
+}
