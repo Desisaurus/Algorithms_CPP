@@ -1,0 +1,757 @@
+#include <stdlib.h>
+#include <limits>
+#include <sstream>
+#include <fstream>
+#include <iostream>
+using namespace std;
+
+class RunLength {
+private:
+  int numRows;
+  int numCols;
+  int minVal;
+  int maxVal;
+
+  int row;      // image row index (0 - numRows)
+  int col;      // image column index (0 - numCols)
+  int numRuns;  // # of runs counted (current method)
+  int count;    // # of pixels in current run
+  int currVal;  // current pixel being encoded/decoded
+  int nextVal;  // next pixel to be encoded
+
+  // Method 1 encodes zero’s but not wrap-around
+  void encodeMethod1(ifstream& inFile, fstream& encodeFile) {
+    numRuns = 0;
+    row = 0;
+    inFile >> nextVal;
+    
+    // Loops while image contains more rows
+    while (row < numRows) {
+      col = 0;    // new row, resets column
+      count = 0;  // new row (i.e. run), resets count
+      // Initializes the row's first run
+      currVal = nextVal;
+      encodeFile << row << " " << col << " " << currVal << " ";
+      // Loops while row contains more columns
+      while (col < numCols) {
+        // If there are more pixels in current run, ups count
+        if (currVal == nextVal) {
+          count++;
+        // Otherwise, ends the current run and starts a new one
+        } else {
+          // Ends current run
+          encodeFile << count << endl;
+          numRuns++;
+          // Begins new run
+          count = 1;
+          currVal = nextVal;
+          encodeFile << row << " " << col << " " << currVal << " ";
+        }
+        col++;
+        inFile >> nextVal;
+      }
+      // Ends current run (last of row), and advances row index
+      encodeFile << count << endl;
+      numRuns++;
+      row++;
+    }
+  }
+
+  // Method 2 does not encode zero’s or wrap-around
+  void encodeMethod2(ifstream& inFile, fstream& encodeFile) {
+    numRuns = 0;
+    row = 0;    
+    inFile >> nextVal;
+    
+    // Loops while image contains more rows
+    while (row < numRows) {
+      col = 0;    // new row, resets column 
+      count = 0;  // new row (i.e. run), resets count
+
+      // Ensures a non-zero for next pixel of new run
+      if (nextVal == 0) {
+        while (nextVal == 0) {
+          // Advances past zero's; returns false if at a new row
+          if (!skipZerosNoWrap(inFile)) {
+            row++;
+            col = 0;
+            // Returns if at end of image
+            if (row == numRows) {
+              return;
+            }
+          // If not at end of row and/or image, initializes row's first run
+          } else {
+            currVal = nextVal;
+            encodeFile << row << " " << col << " " << currVal << " ";
+          }
+        }
+      } else {
+        currVal = nextVal;
+        encodeFile << row << " " << col << " " << currVal << " ";
+      }
+
+      // Loops while row contains more columns
+      while (col < numCols) {
+        // If there are more pixels in current run, ups count
+        if (currVal == nextVal) {
+          count++;
+        // Otherwise, ends the current run and starts a new one
+        } else {
+          // Ends current run
+          encodeFile << count << endl;
+          numRuns++;
+          // Begins new run
+          count = 1;
+          currVal = nextVal;
+          encodeFile << row << " " << col << " " << currVal << " ";
+        }
+        col++;
+        inFile >> nextVal;
+        if (nextVal == 0) {
+          // Advances past zero's and begins new run if not at end of row
+          if (skipZerosNoWrap(inFile)) {
+            // Once next non-zero pixel is found, ends run and starts a new one
+            encodeFile << count << endl;
+            numRuns++;
+            count = 0;
+            currVal = nextVal;
+            encodeFile << row << " " << col << " " << currVal << " ";
+          }
+        }
+      }
+      // Ends current run (last of row and/or image), and advances row index
+      encodeFile << count << endl;
+      numRuns++;
+      row++;
+    }
+  }
+
+  // Advances past zero's in row; returns true if not at end when finished
+  bool skipZerosNoWrap(ifstream& inFile) {
+    // Loops while next pixel is a zero
+    while (nextVal == 0) {
+      // Returns false if at end of row 
+      if (col == numCols) {
+        return false;
+      }
+      inFile >> nextVal;
+      col++;
+    }
+    return true;
+  }
+  
+  // Method 3 encodes zero’s and wrap-around
+  void encodeMethod3(ifstream& inFile, fstream& encodeFile) {
+    // Initializes the first run
+    numRuns = 0;
+    row = 0;
+    col = 0;
+    count = 0;
+    inFile >> currVal;
+    nextVal = currVal;
+    encodeFile << row << " " << col << " " << currVal << " ";
+    
+    // Loops while image contains more rows
+    while (row < numRows) {
+      // If there are more pixels in current run, ups count
+      if (currVal == nextVal) {
+        count++;
+      // Otherwise, ends the current run and starts a new one
+      } else {
+        // Ends current run
+        encodeFile << count << endl;
+        numRuns++;
+        // Begins new run
+        count = 1;
+        currVal = nextVal;
+        encodeFile << row << " " << col << " " << currVal << " ";
+      }
+      col++;
+      if (col == numCols) {
+        col = 0;  // new row, resets column
+        row++;    // advances row index
+      }
+      inFile >> nextVal;
+    }
+    // Ends final run
+    encodeFile << count << endl;
+    numRuns++;
+  }
+
+  // Method 4 does not encode zero’s but does encode wrap-around
+  void encodeMethod4(ifstream& inFile, fstream& encodeFile) {
+    numRuns = 0;
+    row = 0;    
+    inFile >> nextVal;
+    
+    // Loops while image contains more rows
+    while (row < numRows) {
+      col = 0;  // new row, resets column
+
+      if (nextVal == 0) {
+        // Ensures non-zero for first pixel; returns true if at end of image
+        if (skipZerosWithWrap(inFile)) {
+          return;
+        // If not at end of image, initializes first run
+        } else {
+          currVal = nextVal;
+          encodeFile << row << " " << col << " " << currVal << " ";
+        }
+      }
+
+      // Loops while row contains more columns, and is not past end of image
+      while (col < numCols) {
+        // If there are more pixels in current run, ups count
+        if (currVal == nextVal) {
+          count++;
+        // Otherwise, ends the current run and starts a new one
+        } else {
+          // Ends current run
+          encodeFile << count << endl;
+          numRuns++;
+          // Begins new run
+          count = 1;
+          currVal = nextVal;
+          encodeFile << row << " " << col << " " << currVal << " ";
+        }
+        col++;
+        inFile >> nextVal;
+        if (nextVal == 0) {
+          // Advances past zero's and begins new run if not at end of image
+          if (!skipZerosWithWrap(inFile)) {
+            // Once next non-zero pixel is found, ends run and starts a new one
+            encodeFile << count << endl;
+            numRuns++;
+            count = 0;
+            currVal = nextVal;
+            encodeFile << row << " " << col << " " << currVal << " ";
+          // Otherwise (at end of image), ends final run
+          } else {
+            encodeFile << count << endl;
+            numRuns++;
+            return;
+          }
+        }
+      }
+      // Advances row index
+      row++;
+    }
+  }
+  
+  // Advances past any zero's, updating row and column indices
+  // Returns true if at end of image when finished
+  bool skipZerosWithWrap(ifstream& inFile) {
+    // Resets row and column upon reaching row's end
+    if (col == numCols) {
+      row++;
+      col = 0;
+    }
+    // Loops while next pixel exists and is a zero
+    while (nextVal == 0 && row < numRows) {
+      inFile >> nextVal;
+      col++;
+      // Resets row and column upon reaching row's end
+      if (col == numCols) {
+        row++;
+        col = 0;
+      }
+    }
+    // Returns true if rows and given numRows are equal (i.e. at end of image)
+    return row == numRows;
+  }
+
+  // Method 1 encodes zero’s but not wrap-around
+  void decodeMethod1(fstream& encodeFile, ofstream& decodeFile) {
+    int currCol = 0;  // current column index pointer
+    int currRow = 0;  // current row index pointer
+    
+    // Loops until all runs have been read and decoded
+    while (numRuns > 0) {
+      // Initializes values for next run
+      encodeFile >> row;
+      encodeFile >> col;
+      encodeFile >> currVal;
+      encodeFile >> count;
+      numRuns--;
+
+      // Outputs pixels in run; if end of row outputs new line, and goes to next
+      for (int i = 0; i < count - 1; i++) {
+        decodeFile << currVal << " ";
+        currCol++;
+      }
+      if (currCol == numCols - 1) {
+        decodeFile << currVal << endl;
+        currRow++;
+        currCol = 0;
+      } else {
+        decodeFile << currVal << " ";
+        currCol++;
+      }
+    }
+
+    // If not at end of image when all runs have processed, pads zero's
+    if (currCol != 0) {
+      for (int i = currCol; i < numCols - 1; i++) {
+        decodeFile << 0 << " ";
+      }
+      decodeFile << 0 << endl;
+      currRow++;
+    }
+    while (currRow < numRows) {
+      for (int i = 0; i < numCols - 1; i++) {
+        decodeFile << 0 << " ";
+      }
+      decodeFile << 0 << endl;
+      currRow++;
+    }
+  }
+
+  // Method 2 does not encode zero’s or wrap-around
+  void decodeMethod2(fstream& encodeFile, ofstream& decodeFile) {
+    int currCol = 0;  // current column index pointer
+    int currRow = 0;  // current row index pointer
+    
+    // Loops until all runs have been read and decoded
+    while (numRuns > 0) {
+      // Initializes values for next run
+      encodeFile >> row;
+      encodeFile >> col;
+      encodeFile >> currVal;
+      encodeFile >> count;
+      numRuns--;
+      
+      // If next run starts after currRow or currCol, adds zero's until met
+      if (currRow != row || currCol != col) {
+        // If not at run row, pads zero's, outputs new line, goes to next
+        while (currRow != row) {
+            for (int i = currCol; i < numCols - 1; i++) {
+              decodeFile << 0 << " ";
+            }
+            decodeFile << 0 << endl;
+            currRow++;
+            currCol = 0;
+        }
+        // If not at run start, pads zero's
+        if (currCol != col) {
+          for (int i = currCol; i < col; i++) {
+            decodeFile << 0 << " ";
+            currCol++;
+          }
+        }
+      }
+
+      // Outputs pixels in run; if end of row outputs new line, and goes to next
+      for (int i = 0; i < count - 1; i++) {
+        decodeFile << currVal << " ";
+        currCol++;
+      }
+      if (currCol == numCols - 1) {
+        decodeFile << currVal << endl;
+        currRow++;
+        currCol = 0;
+      } else {
+        decodeFile << currVal << " ";
+        currCol++;
+      }
+    }
+
+    // If not at end of image when all runs have processed, pads zero's
+    if (currCol != 0) {
+      for (int i = currCol; i < numCols - 1; i++) {
+        decodeFile << 0 << " ";
+      }
+      decodeFile << 0 << endl;
+      currRow++;
+    }
+    while (currRow < numRows) {
+      for (int i = 0; i < numCols - 1; i++) {
+        decodeFile << 0 << " ";
+      }
+      decodeFile << 0 << endl;
+      currRow++;
+    }
+  }
+
+  // Method 3 encodes zero’s and wrap-around
+  void decodeMethod3(fstream& encodeFile, ofstream& decodeFile) {
+    int currCol = 0;  // current column index pointer
+    int currRow = 0;  // current row index pointer
+    int rowDiff;      // # of pixels in current run that wrap to next row
+    
+    // Loops until all runs have been read and decoded
+    while (numRuns > 0) {
+      // Initializes values for next run
+      encodeFile >> row;
+      encodeFile >> col;
+      encodeFile >> currVal;
+      encodeFile >> count;
+      numRuns--;
+
+      // Determines how many wrapped pixels, if any, current run contains
+      rowDiff = (col + count) - numRows;
+      // If there are no wrapped pixels, outputs current value for each in row
+      if (rowDiff <= 0) {
+        for (int i = 0; i < count - 1; i++) {
+          decodeFile << currVal << " ";
+          currCol++;
+        }
+        // If at end of row, outputs a new line and goes to next
+        if (rowDiff == 0) {
+          decodeFile << currVal << endl;
+          currRow++;
+          currCol = 0;
+        // Otherwise, adds final pixel and space for current run
+        } else {
+          decodeFile << currVal << " ";
+          currCol++;
+        }
+      // If there are wrapped pixels, updates count value to represent row only
+      // Outputs pixels that remain in run
+      } else {
+        count -= rowDiff;
+        // Outputs pixels remaining in row, outputs new line, and goes to next
+        for (int i = 0; i < count - 1; i++) {
+          decodeFile << currVal << " ";
+        }
+        decodeFile << currVal << endl;
+        currRow++;
+        currCol = 0;
+        // Any remaining pixels in run are represented by rowDiff; outputs these
+        if (rowDiff > 0) {
+          // Loops while there are entire rows left to be output
+          while (rowDiff >= numRows) {
+            // Outputs entire row of pixels, outputs new line, and goes to next
+            for (int i = 0; i < numRows - 1; i++) {
+              decodeFile << currVal << " ";
+            }
+            decodeFile << currVal << endl;
+            currRow++;
+            currCol = 0;
+            rowDiff -= numRows;
+          }
+          // Outputs any remaining pixels from current run
+          if (rowDiff > 0) {
+            for (int i = 0; i < rowDiff; i++) {
+              decodeFile << currVal << " ";
+              currCol++;
+            }
+          }
+        }
+      }
+    }
+
+    // If not at end of image when all runs have processed, pads zero's
+    if (currCol != 0) {
+      for (int i = currCol; i < numCols - 1; i++) {
+        decodeFile << 0 << " ";
+      }
+      decodeFile << 0 << endl;
+      currRow++;
+    }
+    while (currRow < numRows) {
+      for (int i = 0; i < numCols - 1; i++) {
+        decodeFile << 0 << " ";
+      }
+      decodeFile << 0 << endl;
+      currRow++;
+    }
+  }
+
+  // Method 4 does not encode zero’s but does encode wrap-around
+  void decodeMethod4(fstream& encodeFile, ofstream& decodeFile) {
+    int currCol = 0;  // current column index pointer
+    int currRow = 0;  // current row index pointer
+    int rowDiff;      // # of pixels in current run that wrap to next row
+    
+    // Loops until all runs have been read and decoded
+    while (numRuns > 0) {
+      // Initializes values for next run
+      encodeFile >> row;
+      encodeFile >> col;
+      encodeFile >> currVal;
+      encodeFile >> count;
+      numRuns--;
+      
+      // If next run starts after currRow or currCol, adds zero's until met
+      while (currRow != row || currCol != col) {
+        // If only current row needs zero's, pads them
+        if (currRow == row) {
+          for (int i = currCol; i < col; i++) {
+            decodeFile << 0 << " ";
+            currCol++;
+          }
+        // If current plus additional rows need zero's, pads them
+        } else {
+          // If not at row start, pads zero's, outputs new line, goes to next
+          if (currCol != 0) {
+            for (int i = currCol; i < numCols - 1; i++) {
+              decodeFile << 0 << " ";
+            }
+            decodeFile << 0 << endl;
+            currRow++;
+            currCol = 0;
+          }
+          // If not yet at next run, pads zero's, outputs new line, goes to next
+          for (int i = currRow; i < row; i++) {
+            for (int i = 0; i < numCols - 1; i++) {
+              decodeFile << 0 << " ";
+            }
+            decodeFile << 0 << endl;
+            currRow++;
+          }
+        }
+      }
+
+      // Determines how many wrapped pixels, if any, current run contains
+      rowDiff = (col + count) - numRows;
+      // If there are no wrapped pixels, outputs current value for each in row
+      if (rowDiff <= 0) {
+        for (int i = 0; i < count - 1; i++) {
+          decodeFile << currVal << " ";
+          currCol++;
+        }
+        // If at end of row, outputs a new line and goes to next
+        if (rowDiff == 0) {
+          decodeFile << currVal << endl;
+          currRow++;
+          currCol = 0;
+        // Otherwise, adds final pixel and space for current run
+        } else {
+          decodeFile << currVal << " ";
+          currCol++;
+        }
+      // If there are wrapped pixels, updates count value to represent row only
+      // Outputs pixels that remain in run
+      } else {
+        count -= rowDiff;
+        // Outputs pixels remaining in row, outputs new line, and goes to next
+        for (int i = 0; i < count - 1; i++) {
+          decodeFile << currVal << " ";
+        }
+        decodeFile << currVal << endl;
+        currRow++;
+        currCol = 0;
+        // Any remaining pixels in run are represented by rowDiff; outputs these
+        if (rowDiff > 0) {
+          // Loops while there are entire rows left to be output
+          while (rowDiff >= numRows) {
+            // Outputs entire row of pixels, outputs new line, and goes to next
+            for (int i = 0; i < numRows - 1; i++) {
+              decodeFile << currVal << " ";
+            }
+            decodeFile << currVal << endl;
+            currRow++;
+            currCol = 0;
+            rowDiff -= numRows;
+          }
+          // Outputs any remaining pixels from current run
+          if (rowDiff > 0) {
+            for (int i = 0; i < rowDiff; i++) {
+              decodeFile << currVal << " ";
+              currCol++;
+            }
+          }
+        }
+      }
+    }
+
+    // If not at end of image when all runs have processed, pads zero's
+    if (currCol != 0) {
+      for (int i = currCol; i < numCols - 1; i++) {
+        decodeFile << 0 << " ";
+      }
+      decodeFile << 0 << endl;
+      currRow++;
+    }
+    while (currRow < numRows) {
+      for (int i = 0; i < numCols - 1; i++) {
+        decodeFile << 0 << " ";
+      }
+      decodeFile << 0 << endl;
+      currRow++;
+    }
+  }
+
+public:
+  RunLength(ifstream& inFile) {
+    // Reads image header - the first four integers in the input file
+    // These determine the image numRows, numCols, minVal, and maxVal
+    inFile >> numRows;
+    inFile >> numCols;
+    inFile >> minVal;
+    inFile >> maxVal;
+  }
+
+  int getNumRows() {
+    return numRows;
+  }
+
+  int getNumCols() {
+    return numCols;
+  }
+
+  int getMinVal() {
+    return minVal;
+  }
+
+  int getMaxVal() {
+    return maxVal;
+  }
+
+  void runLengthEncode(ifstream& inFile, fstream& encodeFile,
+                                  ofstream& outFile, int methodNum) {
+    if (methodNum == 1) {
+      encodeMethod1(inFile, encodeFile);
+    } else if (methodNum == 2) {
+      encodeMethod2(inFile, encodeFile);
+    } else if (methodNum == 3) {
+      encodeMethod3(inFile, encodeFile);
+    } else {
+      encodeMethod4(inFile, encodeFile);
+    }
+    outFile << "Method " << methodNum << " was used to compress and decompress"
+      << " the input image\n";
+    outFile << numRuns << " runs produced in Run-Length encoding\n";
+    outFile << numRuns * 16 << " bytes used without counting the image header"
+      << endl;
+  }
+
+  void runLengthDecode(fstream& encodeFile, ofstream& decodeFile) {
+    // Reads image header - the first four integers in the encoded file
+    // These determine the encoded image's numRows, numCols, minVal, and maxVal
+    encodeFile >> numRows;
+    encodeFile >> numCols;
+    encodeFile >> minVal;
+    encodeFile >> maxVal;
+    decodeFile << numRows << " " << numCols << " " << minVal << " " << maxVal
+      << endl;
+    int whichMethod;
+    encodeFile >> whichMethod;
+    if (whichMethod == 1) {
+      decodeMethod1(encodeFile, decodeFile);
+    } else if (whichMethod == 2) {
+      decodeMethod2(encodeFile, decodeFile);
+    } else if (whichMethod == 3) {
+      decodeMethod3(encodeFile, decodeFile);
+    } else {
+      decodeMethod4(encodeFile, decodeFile);
+    }
+  }
+}; // runLength class
+
+
+/******************************************************************************/
+
+int main(int argc, char* argv[]) {
+  bool done = false;
+  RunLength* runLength;
+  
+  char yesNo = 'a';
+  int whichMethod;
+  string nameEncodeFile;
+  string nameDecodeFile;
+
+  // Program name is argv[0], so argc = number of arguments passed in + 1
+  if (argc != 3) {
+    cout << "Incorrect number of arguments in command line. ";
+    cout << "Program must be run with an input and output file." << endl;
+    exit(1);
+  }
+  
+  // Input file is a text file representing an image (gray-scale or binary)
+  ifstream inFile;
+  inFile.open(argv[1]);
+  // Output file stores compression method, number of runs and total bytes used
+  ofstream outFile;
+  outFile.open(argv[2]);
+
+  // Performs initial reading to determine numRows, numCols, minVal and maxVal
+  if (inFile.is_open()) {
+    runLength = new RunLength(inFile);
+  } else {
+    cout << "\nUnable to open input file.";
+    return 1;
+  }
+
+  if (!outFile.is_open()) {
+    cout << "\nUnable to open output file.";
+    return 1;
+  }
+
+  cout << "\n     *** Run Length Encode & Decode ***\n";
+  
+  while (!done) {
+    cout << "\nChoices for encoding method:\n";
+    cout << "Method 1) Encodes zero’s and not wrap-around.\n";
+    cout << "Method 2) Does not encode zero’s and not wrap-around.\n";
+    cout << "Method 3) Encodes zero’s and wrap-around.\n";
+    cout << "Method 4) Does not encode zero’s but does wrap-around.\n";
+    while (yesNo != 'Y' && yesNo != 'N') {
+      cout << "\nDo you want to use another method to encode the file ";
+      cout << "(‘Y’ for yes, ‘N’ for no)?\n";
+      cin >> yesNo;
+      yesNo = toupper(yesNo);
+    }
+    if (yesNo == 'N') {
+      cout << "\nYou have chosen to exit.\n";
+      done = true;
+    } else {
+      cout << "\nWhich method would you like to use (#1-4)?\n";
+      cin >> whichMethod;
+      while (cin.fail() || whichMethod < 1 || whichMethod > 4) {
+        if (cin.fail()) {
+          cout << "Incorrect input. ";
+          // Clears error state
+          cin.clear();
+          // Discards invalid character(s)
+          cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        }
+        cout << "Please enter a number between 1 and 4.\n";
+        cin >> whichMethod;
+      }
+      
+      fstream encodeFile;
+      nameEncodeFile = argv[1];
+      stringstream updateFileName;
+      updateFileName << "_EncodeMethod" << whichMethod;
+      nameEncodeFile.insert(nameEncodeFile.find(".txt"), updateFileName.str());
+      encodeFile.open(nameEncodeFile.c_str(), fstream::out);
+
+
+      if (encodeFile.is_open()) {
+        encodeFile << runLength->getNumRows() << " " << runLength->getNumCols()
+          << " " << runLength->getMinVal() << " " << runLength->getMaxVal()
+          << " " << endl;
+        encodeFile << whichMethod << endl;
+        runLength->runLengthEncode(inFile, encodeFile, outFile, whichMethod);
+      } else {
+        cout << "\nUnable to open encode file.";
+        return 1;
+      }
+
+      encodeFile.close();
+      encodeFile.open(nameEncodeFile.c_str());
+
+      ofstream decodeFile;
+      nameDecodeFile = nameEncodeFile;
+      nameDecodeFile.insert(nameDecodeFile.find(".txt"), "_Decoded");
+      decodeFile.open(nameDecodeFile.c_str());
+
+      if (encodeFile.is_open() && decodeFile.is_open()) {
+        runLength->runLengthDecode(encodeFile, decodeFile);
+      } else {
+        cout << "\nUnable to open encode and/or decode file(s).";
+        return 1;
+      }
+
+      encodeFile.close();
+      decodeFile.close();
+
+      yesNo = 'a';
+    }
+  }
+  inFile.close();
+  outFile.close();
+
+  return 0;
+}
