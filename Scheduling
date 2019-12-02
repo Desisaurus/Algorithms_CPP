@@ -1,0 +1,630 @@
+#include <stdlib.h>
+#include <sstream>
+#include <fstream>
+#include <iostream>
+using namespace std;
+
+struct listNode {
+  int jobId;
+  int jobTime;
+  int dependentCount;
+  listNode* next;
+
+  listNode(int id, int time, int dependents) {
+    jobId = id;
+    jobTime = time;
+    dependentCount = dependents;
+    next = NULL;
+  }
+}; // listNode struct
+
+
+/******************************************************************************/
+
+struct JOBS {
+  int jobTime;      // processing time required for the job
+  int onWhichProc;  // processor job is on; 0 for not on any proc, -1 completed
+  int onOpen;       // set to 1 if job is onOpen (or has been), and 0 if not
+
+  int parentCount;
+  int dependentCount;
+  
+  JOBS() {
+    // Initializes members to -1 (job unused or not yet initialized)
+    jobTime = -1;
+    onWhichProc = -1;
+    onOpen = -1;
+    parentCount = -1;
+    dependentCount = -1;
+	}
+}; // Jobs struct
+
+
+/******************************************************************************/
+
+struct Proc {
+  int doWhichJob;  // the job currently being processed
+  int timeRemain;  // processing time remaining on job; <= 0 means its available
+
+  Proc() {
+    doWhichJob = -1;   // initialized -1 (no job is currently being processed)
+    timeRemain = -1;   // initialized to available (0 means just finished a job)
+  }
+}; // Proc struct
+
+
+/******************************************************************************/
+
+class Scheduling {
+private:
+  // Node IDs are numbered 1-N (zero is not used)
+  int numNodes;  // total number of nodes (also called N) in input graph G
+
+  int numProcs;       // the number of processors that can be used
+  int procUsed;       // the number of processors currently in use
+  int totalJobTimes;  // the sum of job times for all nodes
+
+  int currentTime;
+  
+  // Nodes in OPEN are orphans, sorted by dependentCount in descending order
+  // (i.e. nodes with more dependents will be in the front of nodes with less)
+  listNode* OPEN;  // pointer acting as list head (dummy node) of linked list
+
+  JOBS* jobAry;  // a job array, sized N+1; array index is job ID
+  Proc* procAry;  // a processor array, sized numProcs+1; array index is proc id
+
+  // The follow matrix represents the input dependency graph
+  // If adjMatrix[i][j] = 1, then node j is a dependent of node i
+  // Also tracks node parent and dependent count, plus if node is in graph
+  int** adjMatrix;  // a 2D adjacency matrix , sized N+1 by N+1
+
+  int** scheduleTable;  // a schedule array, sized numProcs+1 by totalJobTimes+1
+  
+  // Gets number of processors available, rejecting non-positive integer input
+  int getNumProcs() {
+    string s;
+    int givenProcs;
+    while (true) {
+      cout << "\nPlease enter the number of processors available for use: ";
+      getline(cin, s);
+      stringstream stream(s);
+      if (stream >> givenProcs && givenProcs > 0) {
+        break;
+      }
+      cout << "\nNeed 1 or more processors; try again.\n";
+    }
+    return givenProcs;
+  }
+
+  // Loads dependency pairs into adjMatrix
+  void loadMatrix(ifstream& inFile) {
+    int ni;
+    int nj;
+    // Reads in node i and node j of each edge (<ni, nj>) in inFile
+    while (inFile >> ni >> nj) {
+      // Sets node j as a dependent of node i (i.e. equal to 1)
+      adjMatrix[ni][nj] = 1;
+    }
+    // Checks to ensure end of file has been reached
+    if (!inFile.eof()) {
+      cout << "File read error; inFile1 must be in the following form:\n"
+           << "First text line represents the number of nodes in the graph. "
+           << "Subsequent lines contain integer pairs representing node id of "
+           << "parent node, and a child, i.e. dependent node (<ni, nj>).";
+      exit(1);
+    }
+  }
+
+  // Finds the sum of all job times and initializes jobAry
+  void constructJobAry(ifstream& inFile) {
+    totalJobTimes = 0;
+    int nodeId;
+    int jobTime;
+    // Goes through all nodes in inFile
+    while (inFile >> nodeId >> jobTime) {
+      // Adds current node's jobTime to the total
+      totalJobTimes += jobTime;
+      // Initializes jobAry for current node
+      jobAry[nodeId].jobTime = jobTime;
+      jobAry[nodeId].onWhichProc = 0;
+      jobAry[nodeId].onOpen = 0;
+      jobAry[nodeId].parentCount = adjMatrix[0][nodeId];
+      jobAry[nodeId].dependentCount = adjMatrix[nodeId][0];
+    }
+    // Checks to ensure end of file has been reached
+    if (!inFile.eof()) {
+      cout << "File read error; inFile2 must be in the following form:\n"
+           << "First text line represents the number of nodes in the graph. "
+           << "Subsequent lines contain integer pairs representing node id, "
+           << "and ti, the amount of processing time that node requires "
+           << "(<ni, ti>).";
+      exit(1);
+    }
+  }
+
+  // Finds and sets parent count for each node (first row (0) of adjMatrix)
+  void computeParentCount() {
+    int parentCount;
+    for (int node = 1; node < numNodes + 1; node++) {
+      parentCount = 0;
+      // Parent count equals sum of node's column, not including the diagonal
+      for (int i = 1; i < numNodes + 1; i++) {
+        parentCount += adjMatrix[i][node];
+      }
+      // The adjMatrix diagonal is used to track whether a node is on the graph
+      // Removes any value added in by adjMatrix[node][node] (i.e. the diagonal)
+      parentCount -= adjMatrix[node][node];
+      // Sets node's parent count in adjMatrix
+      adjMatrix[0][node] = parentCount;
+    }
+  }
+  
+  // Finds and sets dependent count for each node (first col (0) of adjMatrix)
+  void computeDependentCount() {
+    int dependentCount;
+    for (int node = 1; node < numNodes + 1; node++) {
+      dependentCount = 0;
+      // Dependent count equals sum of node's row, not including the diagonal
+      for (int j = 1; j < numNodes + 1; j++) {
+        dependentCount += adjMatrix[node][j];
+      }
+      // The adjMatrix diagonal is used to track whether a node is on the graph
+      // Removes any value added in by adjMatrix[node][node] (i.e. the diagonal)
+      dependentCount -= adjMatrix[node][node];
+      // Sets node's dependent count in adjMatrix
+      adjMatrix[node][0] = dependentCount;
+    }
+  }
+  
+  // Returns true if all nodes have been deleted
+  bool graphIsEmpty() {
+    bool isEmpty = true;
+    for (int d = 1; d < numNodes + 1; d++) {
+      // If an element on the adjMatrix diagonal isn't 0, node is still on graph
+      if (adjMatrix[d][d] != 0) {
+        isEmpty = false;
+      }
+    }
+    return isEmpty;
+  }
+
+  // Finds orphan nodes and adds them to linked list OPEN
+  void loadOpen() {
+    int orphan = 0;
+    // Loops through all orphan nodes in graph
+    while (orphan != -1) {
+      // Returns next orphan node, -1 if none found
+      orphan = findOrphan();
+      if (orphan > 0) {
+        // Creates a new node from orphan's id, job time, and dependent count
+        listNode* newNode =
+            new listNode(orphan, jobAry[orphan].jobTime, adjMatrix[orphan][0]);
+        // Adds node to linked list OPEN
+        openInsert(newNode);
+        // Marks node as onOpen
+        jobAry[orphan].onOpen = 1;
+      }
+    }
+  }
+
+  int findOrphan() {
+    for (int node = 1; node < numNodes + 1; node++) {
+      // If node has no parents and isn't onOpen or a processor, it's an orphan
+      if (jobAry[node].parentCount <= 0 && jobAry[node].onOpen == 0
+                                            && jobAry[node].onWhichProc == 0) {
+        return node;
+      }
+    }
+    // No orphan found; returns -1
+    return -1;
+  }
+  
+  // Performs an insertion sort on the linked list OPEN
+  // Nodes are sorted by dependent count in descending order
+  // If new node has same dCount as an existing one, adds new in front of it
+  void openInsert(listNode* newNode) {
+    // Sets a pointer, spot, to listHead, then moves through list
+    listNode* spot = OPEN;
+    while (spot->next != NULL &&
+                        newNode->dependentCount < spot->next->dependentCount) {
+      spot = spot->next;
+    }
+    // Inserts newNode after spot (between spot and spot's next)
+    newNode->next = spot->next;
+    spot->next = newNode;
+  }
+  
+  // Prints nodes in OPEN linked list (w/o listHead) to outFile for debugging
+  void printList(ofstream& outFile) {
+    if (OPEN->next == NULL) {
+      outFile << "\nIteration (i.e. current time): " << currentTime;
+      outFile << "\n\nList is empty (OPEN --> NULL)!\n\n";
+      return;
+    }
+    listNode* node = OPEN->next;
+    outFile << "\nIteration (i.e. current time): " << currentTime;
+    outFile << "\n\nOPEN --> ";
+    // Prints id and dependent count of each node ("jobId", dCount)
+    while (node->next != NULL) {
+      outFile << "(\"" << node->jobId << "\", dCount "
+              << node->dependentCount << ") --> ";
+      node = node->next;
+    }
+    // Prints the last node in list
+    outFile << "(\"" << node->jobId << "\", dCount "
+            << node->dependentCount << ") --> NULL" << endl;
+  }
+  
+  // Assigns jobs on OPEN to available processors
+  void loadProcAry() {
+    int availProc = 1;
+    listNode* newJob;
+    // Loops while there are processors available, and jobs on OPEN
+    while (availProc > 0 && OPEN->next != NULL && procUsed < numProcs) {
+      availProc = findProcessor();
+      // If there is a processor available, uses it
+      if (availProc > 0) {
+        procUsed++;
+        // Removes the front job in OPEN and sets pointer to it
+        newJob = removeNode();
+        // Adds job to available processor along with processing time required
+        procAry[availProc].doWhichJob = newJob->jobId;
+        procAry[availProc].timeRemain = newJob->jobTime;
+        // Updates job processor
+        jobAry[newJob->jobId].onWhichProc = availProc;
+        // Adds job to schedule with as many time slots as jobTime requires
+        putJobOnTable(availProc, newJob->jobId, newJob->jobTime);
+      }
+    }
+  }
+
+  // Finds the first available processor in procAry
+  int findProcessor() {
+    for (int proc = 1; proc < numProcs + 1; proc++) {
+      // Processors with <= 0 time remaining are available
+      if (procAry[proc].timeRemain <= 0) {
+        return proc;
+      }
+    }
+    // All processors are busy; returns -1
+    return -1;
+  }
+
+  // Deletes and returns first job in OPEN
+  // List previously confirmed as not empty by caller fxn (loadProcAry())
+  listNode* removeNode() {
+    // Sets a pointer; first job in OPEN is the node after dummy (i.e. head)
+    listNode* nextJob = OPEN->next;
+    // Removes job from list
+    OPEN->next = OPEN->next->next;
+    nextJob->next = NULL;
+    // Returns removed job
+    return nextJob;
+  }
+
+  // Adds job to processor's row in schedule table, filling jobTime time slots
+  void putJobOnTable(int availProc, int jobId, int jobTime) {
+    int time = currentTime;
+    int endTime = time + jobTime;
+    while (time < endTime) {
+      scheduleTable[availProc][time] = jobId;
+      time++;
+    }
+  }
+  
+  // Returns true if graph has a cycle (path which begins and ends at same node)
+  bool hasCycle() {
+    // Checks if all processors are finished and OPEN is empty, but graph is not
+    if (OPEN->next == NULL && !graphIsEmpty() && allProcAvail()) {
+      // This indicates a cycle is present; returns true
+      return true;
+    }
+    return false;
+  }
+
+  // Returns true if all processors are available
+  bool allProcAvail() {
+    // Checks to ensure each processor currently has no job assigned
+    for (int proc = 1; proc < numProcs + 1; proc++) {
+      // If a processor does have a job assigned, returns false
+      if (procAry[proc].doWhichJob != -1) {
+        return false;
+      }
+    }
+    return true;
+  }
+  
+  // Prints the scheduleTable to outFile
+  void printScheduleTable(ofstream& outFile) {
+    // Prints column headings (first row of schedule)
+    outFile << "     0";
+    for (int colNum = 0; colNum < totalJobTimes + 1; colNum++) {
+      if ((colNum / 10) < 1) {
+        outFile << "-";
+      }
+      outFile << "---" << colNum;
+    }
+    outFile << endl;
+    // Prints all subsequent rows of schedule with processor labels and borders
+    for (int i = 1; i < numProcs + 1; i++) {
+      if ((i / 10) < 1) {
+        outFile << " ";
+      }
+      outFile << "P(" << i << ")";
+      for (int j = 0; j < totalJobTimes + 1; j++) {
+        outFile << "| ";
+        if ((scheduleTable[i][j] / 10) < 1) {
+          outFile << " ";
+        }
+        outFile << scheduleTable[i][j] << " ";
+      }
+      outFile << "|" << endl;
+      // Prints bottom border
+      outFile << "     ";
+      for (int j = 0; j < totalJobTimes + 1; j++) {
+        outFile << "-----";
+      }
+      outFile << "-" << endl;
+    }
+  }
+  
+  // Decreases job time remaining by 1 for all used processors
+  void updateProcTime() {
+    for (int proc = 1; proc < numProcs + 1; proc++) {
+      procAry[proc].timeRemain--;
+    }
+  }
+  
+  // Finds first finished processor, makes it available, and returns jobId
+  int findDoneProc() {
+    int jobId;
+    for (int proc = 1; proc < numProcs + 1; proc++) {
+      if (procAry[proc].timeRemain <= 0 && procAry[proc].doWhichJob != -1) {
+        jobId = procAry[proc].doWhichJob;
+        // Sets processor to available (no job being processed)
+        procAry[proc].doWhichJob = -1;
+        procAry[proc].timeRemain = -1;
+        // Decrements procUsed count
+        procUsed--;
+        return jobId;
+      }
+    }
+    // If no finished processors found, returns 0
+    return 0;
+  }
+
+  // Deletes all outgoing edges for given node
+  void deleteEdge(int node) {
+    // Sets node's child count to 0 and removes from graph
+    adjMatrix[node][0] = 0;
+    adjMatrix[node][node] = 0;
+    for (int j = 1; j < numNodes + 1; j++) {
+      // Finds all dependents of node
+      if (adjMatrix[node][j] == 1) {
+        // Removes dependent, and decrements its parent count
+        adjMatrix[node][j] = 0;
+        adjMatrix[0][j]--;
+        jobAry[j].parentCount--;
+      }
+    }
+  }
+
+public:
+  // Constructor (allocates and initializes all class arrays)
+  Scheduling(ifstream& inFile1, ifstream& inFile2) {
+    // The first number in inFile1 is the total nodes in graph (numbered 1 - N)
+    // Reads in that number and assigns it to numNodes
+    inFile1 >> numNodes;
+    // The first number in inFile2 is the total nodes in graph (numbered 1 - N)
+    // Reads in that number and ensures the two match
+    int N;
+    inFile2 >> N;
+    if (numNodes != N) {
+      cout << "Data error: total number of nodes given by input files (first"
+           << "integer listed in each) must match.\n";
+      exit(1);
+    }
+    
+    // Finds and sets the number of processors available
+    numProcs = getNumProcs();
+
+    // The maximum processors needed is numNodes; this is the same as unlimited
+    if (numProcs > numNodes) {
+      numProcs = numNodes;
+    }
+    
+    // Initially sets procUsed to 0 (no processors used)
+    procUsed = 0;
+    
+    // Creates a linked list by initializing dummy, and pointing OPEN at it
+    listNode* dummy = new listNode(9999, 9999, 9999);
+    OPEN = dummy;
+
+    // Dynamically allocates an array to track jobs
+    jobAry = new JOBS[numNodes + 1];
+
+    // Dynamically allocates an array to track processors
+    procAry = new Proc[numProcs + 1];
+    
+    // Dynamically allocates a 2D array to track dependency plus other data
+    adjMatrix = new int*[numNodes + 1];
+    for (int i = 0; i < numNodes + 1; i++) {
+      adjMatrix[i] = new int[numNodes + 1];
+      // Initially sets diagonals to one, borders and rest of matrix to zero
+      for (int j = 0; j < numNodes + 1; j++) {
+        // First row holds parent count of each node
+        // Initially sets parent count to 0
+        if (i == 0) {
+          adjMatrix[0][j] = 0;
+        // First column holds dependent count of each node
+        // Initially sets dependent count to 0
+        } else if (j == 0) {
+          adjMatrix[i][0] = 0;
+        // Matrix diagonal indicates a node is in the graph (i.e. not deleted)
+        // Initializes diagonal to 1 (means node is on graph; 0 means deleted)
+        }  if (i == j) {
+          adjMatrix[i][j] = 1;
+        // Initializes dependency matrix to 0
+        } else {
+          adjMatrix[i][j] = 0;
+        }
+      }
+      // Sets unused element (adjMatrix[0][0]) to -1
+      adjMatrix[0][0] = -1;
+    }
+    
+    // Reads in dependency information and loads adjMatrix
+    loadMatrix(inFile1);
+
+    // Sets parent and dependent counts for each node
+    computeParentCount();
+    computeDependentCount();
+
+    // Sets totalJobTimes and initializes jobAry for each node
+    constructJobAry(inFile2);
+
+    // Dynamically allocates a 2D array for job scheduling
+    scheduleTable = new int*[numProcs + 1];
+    for (int i = 0; i < numProcs + 1; i++) {
+      scheduleTable[i] = new int[totalJobTimes + 1];
+      // Initially sets borders to heading labels, and rest of table to zero
+      for (int j = 0; j < totalJobTimes + 1; j++) {
+        // Borders (i.e. row and column 0) set to represent headings
+        // Sets first row to current job time heading
+        if (i == 0) {
+          scheduleTable[i][j] = j;
+        // Initializes rest of table to 0
+        } else {
+          scheduleTable[i][j] = 0;
+        }
+      }
+    }
+  }
+
+  void createSchedule(ofstream& outFile1, ofstream& outFile2) {
+    currentTime = 0;
+    
+    // Prints heading to outFile1 (stores results of scheduling)
+    outFile1 << "=============================================================="
+             << "==================\n                    There are " << numNodes
+             << " jobs in the input graph.\n               Below is the "
+             << "scheduling result for " << numProcs << " processors:\n========"
+             << "=============================================================="
+             << "==========\n\n";
+    // Prints heading to outFile2 (used for debugging)
+    outFile2 << "=============================================================="
+             << "==================\n                              Debugging "
+             << "Output\n======================================================"
+             << "==========================\n";
+    
+    // Loops until graph is empty (i.e. all nodes deleted)
+    while (!graphIsEmpty()) {
+      // Finds and adds orphan nodes to OPEN
+      loadOpen();
+
+      // Performs a debug print with border to outFile2
+      printList(outFile2);
+      outFile2 << "============================================================"
+               << "====================\n";
+      
+      // Adds jobs on OPEN to available processors
+      loadProcAry();
+
+      // Checks to ensure graph does not have a cycle
+      if (hasCycle()) {
+        cout << "\nThere is cycle in the graph!!!\n";
+        exit(1);
+      }
+
+      // Prints the intermediate schedule table
+      outFile1 << "Intermediate schedule table:\n\n";
+      printScheduleTable(outFile1);
+      outFile1 << "\n========================================\n\n";
+
+      // Advances the current time, and updates all processors via the procAry
+      currentTime++;
+      updateProcTime();
+
+      int jobId = 1;
+      // Loops while processors have finished jobs
+      // A jobId of 0 means no processors have finished a job this time block
+      while (jobId > 0) {
+        jobId = findDoneProc();
+        // Deletes job from graph and sets it to completed
+        if (jobId > 0) {
+          // Deletes completed job node from the graph and any associated edges
+          deleteEdge(jobId);
+          // Sets job to completed
+          jobAry[jobId].onWhichProc = -1;
+        }
+      }
+    }
+    // Prints the final schedule
+    outFile1 << "Final schedule:\n\n";
+    printScheduleTable(outFile1);
+    outFile1 << "=============================================================="
+             << "==================";
+  }
+}; // Scheduling class
+
+
+/******************************************************************************/
+
+int main(int argc, char* argv[]) {
+  if (argc != 5) {
+    cout << "Incorrect number of arguments in command line. "
+         << "Program must be run with two input files and two output files "
+         << "- 4 total command line arguments." << endl;
+    return 1;
+  }
+  
+  // Input file 1 is a text file representing the dependency graph G = <N, E>
+  // This is represented by a list of edges which denote dependency <ni, nj>
+  ifstream inFile1;
+  inFile1.open(argv[1]);
+  
+  // Input file 2 is a text file containing the processing times for each node
+  // This is represented by a list of pairs, <ni, ti>, with ni as the node’s id,
+  // and ti the unit of processing times for node ni
+  ifstream inFile2;
+  inFile2.open(argv[2]);
+
+  // Output file 1 stores the scheduling results (i.e. the schedule)
+  ofstream outFile1;
+  outFile1.open(argv[3]);
+  
+  // Output file 2 is for debugging outputs
+  ofstream outFile2;
+  outFile2.open(argv[4]);
+  
+  // Checks that both inFiles opened correctly
+  if (!inFile1.is_open()) {
+    cout << "\nUnable to open first input file (argv[1]).";
+    return 1;
+  } else if (!inFile2.is_open()) {
+    cout << "\nUnable to open second input file (argv[2]).";
+    return 1;
+  }
+
+  // Checks that both outFiles opened correctly
+  if (!outFile1.is_open()) {
+    cout << "\nUnable to open first output file (argv[3]).";
+    return 1;
+  } else if (!outFile2.is_open()) {
+    cout << "\nUnable to open second output file (argv[4]).";
+    return 1;
+  }
+
+  // Declares and initializes schedule
+  Scheduling table(inFile1, inFile2);
+
+  // Creates schedule and outputs
+  table.createSchedule(outFile1, outFile2);
+
+  inFile1.close();
+  inFile2.close();
+  outFile1.close();
+  outFile2.close();
+  
+  return 0;
+}
